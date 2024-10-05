@@ -204,6 +204,12 @@ class AggregationExecutor : public AbstractExecutor {
 
   /** Simple aggregation hash table */
   // TODO(Student): Uncomment SimpleAggregationHashTable aht_;
+    SimpleAggregationHashTable aht_;
+
+  /** Simple aggregation hash table iterator */
+  SimpleAggregationHashTable::Iterator aht_iterator_;
+
+  bool special_case_end_;
 
   /** Simple aggregation hash table iterator */
   // TODO(Student): Uncomment SimpleAggregationHashTable::Iterator aht_iterator_;
