@@ -84,12 +84,12 @@ class DiskScheduler {
   auto CreatePromise() -> DiskSchedulerPromise { return {}; };
 
  private:
-  /** Pointer to the disk manager. */
+  /** 指向磁盘管理器的指针. */
   DiskManager *disk_manager_ __attribute__((__unused__));
   /** A shared queue to concurrently schedule and process requests. When the DiskScheduler's destructor is called,
-   * `std::nullopt` is put into the queue to signal to the background thread to stop execution. */
+   *一个共享队列，用于并发安排和处理请求。当调用DiskScheduler的析构函数时，会将`std::nullopt`放入队列中，以向后台线程发出停止执行的信号。 */
   Channel<std::optional<DiskRequest>> request_queue_;
-  /** The background thread responsible for issuing scheduled requests to the disk manager. */
+  /** 负责将已安排的请求提交给磁盘管理器的后台线程. */
   std::optional<std::thread> background_thread_;
 };
 }  // namespace bustub
