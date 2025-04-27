@@ -130,7 +130,7 @@ void LRUKReplacer::SetEvictable(frame_id_t frame_id, bool set_evictable) {
 void LRUKReplacer::Remove(frame_id_t frame_id) {
     std::scoped_lock<std::mutex>lock(latch_);
     auto it=node_store_.find(frame_id);
-    if(it != node_store_.end())
+    if(it == node_store_.end())
     {
         return;
     }
