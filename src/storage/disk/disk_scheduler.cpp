@@ -13,7 +13,8 @@
 #include "storage/disk/disk_scheduler.h"
 #include "common/exception.h"
 #include "storage/disk/disk_manager.h"
-
+//实现一个简单的磁盘调度器，接收BufferPoolManager发来的读写磁盘请求放入一个请求队列中；
+//然后启动一个新线程，不断从请求队列中获取请求，根据请求类型调用对应DiskManager的读写函数进行磁盘读写。
 namespace bustub {
 
 DiskScheduler::DiskScheduler(DiskManager *disk_manager) : disk_manager_(disk_manager) {
