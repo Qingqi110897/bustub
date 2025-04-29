@@ -135,6 +135,33 @@ auto DiskExtendibleHashTable<K, V, KC>::GetValue(const K &key, std::vector<V> *r
 ​特殊情况​：
 
 首次插入时需初始化目录页和桶页（InsertToNewDirectory/InsertToNewBucket）。*/
+
+
+/*3. 分裂的具体步骤​
+​步骤1：增加局部深度​
+原桶 A 的局部深度从 2 增加到 3。
+​为什么是3？​​
+因为分裂后需要用 ​更高位的哈希位​ 来区分新旧桶（即多取1位哈希值）。
+​步骤2：创建新桶​
+新桶 B 的目录索引通过以下方式计算：
+原桶 A 的索引：01（二进制）。
+新桶 B 的索引：在原索引的最高位（第3位）取反，即 01 → 11（二进制）。
+计算公式：new_bucket_index = old_bucket_index | (1 << (local_depth - 1))
+（| 是按位或，<< 是左移运算）
+新桶 B 的局部深度也设为 3。
+​步骤3：更新目录映射​
+​目录扩展​：
+如果原全局深度 = 局部深度（这里是 2 = 2），则需要先扩展目录：
+全局深度从 2 增加到 3。
+目录槽位数从 4 扩展到 8（000 到 111）。
+​重新映射​：
+所有哈希值以 01 开头的目录项（原指向桶 A）需要重新分配：
+如果新哈希位（第3位）是 0 → 仍指向桶 A（索引 010）。
+如果新哈希位是 1 → 指向桶 B（索引 011）。
+​步骤4：数据重分布​
+遍历原桶 A 中的所有键值对，重新计算哈希值：
+若哈希的新最高位为 0 → 保留在桶 A。
+若为 1 → 移动到桶 B。*/
 template <typename K, typename V, typename KC>
 auto DiskExtendibleHashTable<K, V, KC>::Insert(const K &key, const V &value, Transaction *transaction) -> bool {
    // 1. 定位目录页和桶页（类似GetValue）
