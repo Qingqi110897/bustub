@@ -53,17 +53,40 @@ DiskExtendibleHashTable<K, V, KC>::DiskExtendibleHashTable(const std::string &na
         header_page->Init(header_max_depth);
         header_page_id_=page_id;
 }
-
+/*​头部页（Header Page）​​
+作用：顶层索引，管理目录页的分布
+关键参数：
+header_max_depth_：最大深度，决定能管理的目录页数量（2^header_max_depth）
+通过哈希值的高位直接定位目录页（HashToDirectoryIndex）
+​目录页（Directory Page）​​
+作用：维护哈希值到桶页的映射
+关键参数：
+directory_max_depth_：目录的全局深度（Global Depth）
+每个桶有局部深度（Local Depth），用于控制分裂范围
+​桶页（Bucket Page）​​
+作用：实际存储键值对
+关键参数：
+bucket_max_size_：单个桶的容量限制
+满时触发分裂（Split），空时可能合并（Merge）
+*/
 /*****************************************************************************
  * SEARCH
  *****************************************************************************/
 // 这段代码的目的是根据给定的键 key，通过哈希值找到对应的目录索引，然后从头部页中找到相应的目录页 ID。
 // 如果目录页有效，则接下来可以继续查找对应的桶页中的值
+/*1. ​查找（GetValue）​​
+​流程​：
+计算键的哈希值。
+通过头部页定位目录页。
+通过目录页定位桶页。
+在桶页中线性搜索目标键。*/
 template <typename K, typename V, typename KC>
 auto DiskExtendibleHashTable<K, V, KC>::GetValue(const K &key, std::vector<V> *result, Transaction *transaction) const
     -> bool {
+    // 1. 读取头部页
       auto header_guard=bpm_->FetchPageRead(header_page_id_);
       auto header_page=header_guard.As<ExtendibleHTableHeaderPage>();
+   // 2. 计算哈希并定位目录页
       uint32_t hash=Hash(key);
       auto directory_index=header_page->HashToDirectoryIndex(hash);
       page_id_t directory_page_id =header_page->GetDirectoryPageId(directory_index);
@@ -71,6 +94,7 @@ auto DiskExtendibleHashTable<K, V, KC>::GetValue(const K &key, std::vector<V> *r
       {
         return false;
       }
+  // 3. 读取目录页并定位桶页
       ReadPageGuard directory_guard=bpm_->FetchPageRead(directory_page_id);
       auto directory_page = directory_guard.As<ExtendibleHTableDirectoryPage>();
       auto bucket_index=directory_page->HashToBucketIndex(hash);
@@ -79,6 +103,7 @@ auto DiskExtendibleHashTable<K, V, KC>::GetValue(const K &key, std::vector<V> *r
       {
         return false;
       }
+  // 4. 读取桶页并查找键
       ReadPageGuard bucket_guard =bpm_->FetchPageRead(bucket_page_id);
       auto bucket_page =bucket_guard.As<ExtendibleHTableBucketPage<K,V,KC>>();
       V value;
@@ -94,9 +119,28 @@ auto DiskExtendibleHashTable<K, V, KC>::GetValue(const K &key, std::vector<V> *r
 /*****************************************************************************
  * INSERTION
  *****************************************************************************/
+/*2. ​插入（Insert）​​
+​基础流程​：
 
+类似查找，定位到目标桶。
+若桶未满，直接插入；若满则触发分裂。
+​分裂逻辑​：
+
+​目录扩容​：当局部深度等于全局深度时，目录深度翻倍（IncrGlobalDepth）。
+​桶分裂​：
+创建新桶，调整原桶的局部深度。
+重新哈希原桶的所有键值对，分配到新旧桶。
+更新目录映射（UpdateDirectoryMapping）。
+​递归处理​：若新桶仍满，继续分裂。
+​特殊情况​：
+
+首次插入时需初始化目录页和桶页（InsertToNewDirectory/InsertToNewBucket）。*/
 template <typename K, typename V, typename KC>
 auto DiskExtendibleHashTable<K, V, KC>::Insert(const K &key, const V &value, Transaction *transaction) -> bool {
+   // 1. 定位目录页和桶页（类似GetValue）
+    // 2. 若桶页不存在，初始化新桶（InsertToNewBucket）
+    // 3. 若桶页存在但未满，直接插入
+    // 4. 若桶页已满，触发分裂：
   auto header_guard=bpm_->FetchPageWrite(header_page_id_);
   auto header_page=header_guard.AsMut<ExtendibleHTableHeaderPage>();
   uint32_t hash=Hash(key);
@@ -246,6 +290,17 @@ uint32_t new_bucket_idx, page_id_t new_bucket_page_id,uint32_t new_local_depth, 
 /*****************************************************************************
  * REMOVE
  *****************************************************************************/
+/*3. ​删除（Remove）​​
+​基础流程​：
+定位桶页并删除键值对。
+若桶为空，尝试合并。
+​合并逻辑​：
+​条件​：当前桶与分裂镜像桶（Split Image）的局部深度相同。
+​操作​：
+将空桶的映射指向镜像桶。
+降低相关目录项的局部深度。
+若全局深度可缩减（所有局部深度 < 全局深度），则缩减（DecrGlobalDepth）。
+​级联合并​：合并后若镜像桶仍空，继续向上合并。*/
 template <typename K, typename V, typename KC>
 auto DiskExtendibleHashTable<K, V, KC>::Remove(const K &key, Transaction *transaction) -> bool {
   auto header_guard=bpm_->FetchPageRead(header_page_id_);
@@ -272,6 +327,7 @@ auto DiskExtendibleHashTable<K, V, KC>::Remove(const K &key, Transaction *transa
   {
     return false;
   }
+    // 2. 若桶为空，尝试合并
   while(bucket_page->IsEmpty())
   {
     bucket_guard.Drop();
@@ -279,13 +335,29 @@ auto DiskExtendibleHashTable<K, V, KC>::Remove(const K &key, Transaction *transa
     if(bucket_local_depth==0)
     {
       break;
-    }
+    }// 无法合并（已是最小深度）
 
 //获取当前桶的split image桶。split image桶是和当前桶共享同一部分哈希空间的桶
+    /*分裂镜像桶就是由桶分裂来的，但是镜像桶也有可能再分裂导致深度不一样，这样就没法合并了*/
     auto merge_bucket_index = directory_page->GetSplitImageIndex(bucket_index);
     auto merge_bucket_local_depth = directory_page->GetLocalDepth(merge_bucket_index);
     auto merge_bucket_page_id = directory_page->GetBucketPageId(merge_bucket_index);
 //检查桶和split桶的局部深度是否相同 如果相同则可以合并 如果不同则正在使用不同的部分哈希值无法合并
+/* 为什么局部深度相同才能合并？​​
+​核心原因：确保分裂镜像桶（Split Image Bucket）存在且可安全合并​
+​分裂镜像桶的定义​：
+当桶分裂时，原桶和新桶会共享相同的局部深度。例如：
+
+原桶索引 01（局部深度=2）分裂后，新桶索引 11（局部深度=2），此时 01 和 11 互为分裂镜像桶。
+它们的哈希前缀仅在最高位不同（0 vs 1），其余低位相同。
+​合并条件​：
+只有两个桶的局部深度相同，才能保证它们原本是从同一个桶分裂出来的。此时：
+
+​数据分布安全​：合并后，原属于这两个桶的键值对可以安全地归并到一个桶中（因为它们的哈希前缀在合并后的深度下是相同的）。
+​目录一致性​：合并后，目录中所有指向这两个桶的项会被统一指向同一个桶，且局部深度减1。
+​反例​：
+如果局部深度不同（例如一个桶的深度为2，另一个为3），说明它们不是从同一个桶分裂出来的，强行合并会导致哈希映射混乱。
+*/
     if(merge_bucket_local_depth==bucket_local_depth)
     {
       uint32_t traverse_bucket_idx=std::min(bucket_index&directory_page->GetLocalDepthMask(bucket_index),merge_buket_index);
